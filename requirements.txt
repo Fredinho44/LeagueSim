@@ -1,8 +1,11 @@
-streamlit>=1.31
+streamlit>=1.49
 pandas>=2.0
 numpy>=1.24
 PyYAML>=6.0
 scipy>=1.10
 faker==25.8.0
-# If plate_loc_model uses sklearn, uncomment next line
-# scikit-learn>=1.2
+# Optional:
+ scikit-learn>=1.2
+ pyarrow
+ pillow
+
