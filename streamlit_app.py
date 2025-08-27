@@ -6,10 +6,17 @@ from pathlib import Path
 from datetime import date, timedelta
 import pandas as pd
 import numpy as np
+import yaml
+import streamlit as st
+
 
 st.set_page_config(page_title="League Builder + Tuner", layout="wide")
 
 # ---------- small helpers ----------
+uploaded_priors = st.file_uploader("Upload Priors YAML", type=["yaml", "yml"])
+if uploaded_priors is not None:
+    priors = yaml.safe_load(uploaded_priors)
+
 def _ensure_on_path(p: Path):
     p = p.resolve()
     if str(p.parent) not in sys.path:
@@ -1037,3 +1044,4 @@ with tab_help:
         st.markdown(readme_file.read_text(encoding="utf-8"))
     else:
         st.info("Place README_ModelCA_League_Sim.md next to streamlit_app.py to render it here.")
+
