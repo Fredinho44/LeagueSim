@@ -13,6 +13,23 @@ import streamlit as st
 st.set_page_config(page_title="League Builder + Tuner", layout="wide")
 
 # ---------- small helpers ----------
+
+# 1) Try to load bundled priors from repo
+priors_path = Path(__file__).parent / "rules_pitch_by_pitch.yaml"
+priors = None
+
+if priors_path.exists():
+    with open(priors_path, "r", encoding="utf-8") as f:
+        priors = yaml.safe_load(f)
+
+# 2) If not found, let user upload
+if priors is None:
+    uploaded_priors = st.file_uploader("Upload Priors YAML", type=["yaml", "yml"])
+    if uploaded_priors is not None:
+        priors = yaml.safe_load(uploaded_priors)
+
+if priors is None:
+    st.stop() 
 uploaded_priors = st.file_uploader("Upload Priors YAML", type=["yaml", "yml"])
 if uploaded_priors is not None:
     priors = yaml.safe_load(uploaded_priors)
@@ -1044,4 +1061,5 @@ with tab_help:
         st.markdown(readme_file.read_text(encoding="utf-8"))
     else:
         st.info("Place README_ModelCA_League_Sim.md next to streamlit_app.py to render it here.")
+
 
