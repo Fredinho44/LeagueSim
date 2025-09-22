@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 import numpy as np
+from dataclasses import dataclass, field
+from typing import Dict, Any, Tuple
 
 def default_mixtures_demo():
     """
@@ -53,6 +55,53 @@ def count_bucket(balls: int, strikes: int) -> str:
     if balls - strikes >= 2: return "behind"
     if strikes - balls >= 1: return "ahead"
     return "even"
+
+@dataclass
+class PlateLocBundle:
+    pitch_call_by_region: Dict[Tuple[str, str, str, str], Dict[str, Any]] = field(default_factory=dict)
+    region_usage: Dict[Tuple[str, str, str, str], Dict[str, Any]] = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.pitch_call_by_region = self._normalize_map(self.pitch_call_by_region)
+        self.region_usage = self._normalize_map(self.region_usage)
+
+    @staticmethod
+    def _normalize_key(key: Any) -> Tuple[str, str, str, str]:
+        if isinstance(key, tuple):
+            parts = list(key)
+        elif isinstance(key, list):
+            parts = list(key)
+        elif isinstance(key, str):
+            if "|" in key:
+                parts = key.split("|")
+            elif "," in key:
+                parts = key.split(",")
+            else:
+                parts = [key]
+        else:
+            parts = [str(key)]
+        parts = [str(p).strip() if str(p).strip() else "__" for p in parts]
+        while len(parts) < 4:
+            parts.append("__")
+        return tuple(parts[:4])  # type: ignore[arg-type]
+
+    @classmethod
+    def _normalize_map(cls, raw: Any) -> Dict[Tuple[str, str, str, str], Dict[str, Any]]:
+        out: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
+        if not isinstance(raw, dict):
+            return out
+        for key, value in raw.items():
+            norm_key = cls._normalize_key(key)
+            if isinstance(value, dict):
+                out[norm_key] = value
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PlateLocBundle":
+        return cls(
+            pitch_call_by_region=data.get("pitch_call_by_region", {}),
+            region_usage=data.get("region_usage", {}),
+        )
 
 class PlateLocSampler:
     def __init__(self, rng: np.random.Generator, mixtures: dict,

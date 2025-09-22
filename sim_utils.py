@@ -33,6 +33,19 @@ TTO_PENALTY             = 0.10  # 3rd time through order command penalty
 EXTRA_INNING_FATIGUE_SCALE       = 0.50  # multiplies fatigue per pitch/BF in extras (per extra inning)
 EXTRA_INNING_CMD_FLAT_PENALTY    = 0.03  # extra command tax per extra inning (3% each inning past 9)
 
+# Pitch mix knobs
+COUNT_MIX_SCALE = 0.35
+TTO_MIX_SCALE   = 0.40
+
+# Stolen base heuristics
+SB_ATTEMPT_R1_BASE   = 0.02
+SB_ATTEMPT_R2_BASE   = 0.012
+SB_SUCCESS_BASE      = 0.70
+SB_CATCHER_R_BONUS   = 0.05
+
+# Misc probabilities
+ERROR_RATE = 0.015
+
 # ------------- Shared helpers for game simulation (compact) -------------
 INPLAY_RESULTS = ["Out","Single","Double","Triple","HomeRun"]
 VALID_HITTYPE_BY_RESULT = {
@@ -350,6 +363,84 @@ def lineup_from_roster_rows(rows: List[Dict[str,str]], team_key: str, rng: rando
     bats = sorted(bats, key=lambda b: b["_Quality"], reverse=True)[:9]
     rng.shuffle(bats)
     return bats
+
+def lineup_by_positions(rows: List[Dict[str, str]], team_key: str, rng: random.Random) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Return (lineup, catcher_info) using roster metadata when available."""
+    base_lineup = lineup_from_roster_rows(rows, team_key, rng)
+    catcher_info = {"Catcher": "", "CatcherId": "", "CatcherTeam": team_key, "CatcherThrows": ""}
+
+    roster_rows = [r for r in rows if str(r.get("TeamID") or r.get("TeamName")) == str(team_key)]
+    by_pid = {}
+    for r in roster_rows:
+        pid = r.get("PlayerID")
+        if pid:
+            by_pid[str(pid)] = r
+
+    def _pos_tokens(r: Dict[str, str]) -> List[str]:
+        fields = [
+            r.get("Position"), r.get("Positions"), r.get("PrimaryPosition"),
+            r.get("FieldingPosition"), r.get("FieldingPos"), r.get("DepthChartPosition"),
+            r.get("DefPosition"), r.get("DefPos"), r.get("Role"), r.get("LineupPosition"),
+        ]
+        tokens: List[str] = []
+        for val in fields:
+            if not val:
+                continue
+            text = str(val)
+            for part in text.replace("/", ",").replace(";", ",").split(","):
+                clean = part.strip().upper()
+                if clean:
+                    tokens.append(clean)
+        return tokens
+
+    catcher_row = None
+    for r in roster_rows:
+        tokens = _pos_tokens(r)
+        if any(tok == "C" or tok.startswith("CATCH") for tok in tokens):
+            catcher_row = r
+            break
+    if catcher_row is None and roster_rows:
+        # fallback to anyone marked as catcher role
+        for r in roster_rows:
+            if str(r.get("Role", "")).upper() in {"C", "CATCHER"}:
+                catcher_row = r
+                break
+
+    if catcher_row is None and base_lineup:
+        # final fallback: treat first lineup slot as catcher placeholder
+        first = base_lineup[0]
+        catcher_info.update({
+            "Catcher": first.get("Batter", ""),
+            "CatcherId": first.get("BatterId", ""),
+            "CatcherThrows": "Right",
+        })
+    elif catcher_row is not None:
+        catcher_info.update({
+            "Catcher": f"{catcher_row.get('FirstName','')} {catcher_row.get('LastName','')}".strip(),
+            "CatcherId": catcher_row.get("PlayerID", ""),
+            "CatcherThrows": catcher_row.get("Throws", ""),
+        })
+
+    enhanced_lineup: List[Dict[str, Any]] = []
+    for slot in base_lineup:
+        pid = str(slot.get("BatterId", ""))
+        row = by_pid.get(pid)
+        enriched = dict(slot)
+        if row:
+            bats = row.get("Bats") or row.get("BatterSide")
+            if bats:
+                enriched["BatterSide"] = bats
+            for key in ("Contact", "Power", "Discipline", "Height", "Height_in", "sz_bot", "sz_top", "SzBot", "SzTop"):
+                if row.get(key) not in (None, ""):
+                    enriched[key] = row.get(key)
+            if row.get("HittingWeight") not in (None, "") and not enriched.get("_Quality"):
+                enriched["_Quality"] = _safe_float(row.get("HittingWeight"), enriched.get("_Quality", 1.0))
+        enhanced_lineup.append(enriched)
+
+    catcher_info.setdefault("CatcherTeam", team_key)
+    if catcher_info.get("CatcherThrows"):
+        catcher_info["CatcherThrows"] = "Right" if canon_hand(catcher_info["CatcherThrows"]) == "R" else "Left"
+    return enhanced_lineup, catcher_info
 
 # ---------- Availability / rotation ----------
 def is_available(p: Dict[str,Any], when: datetime) -> bool:
