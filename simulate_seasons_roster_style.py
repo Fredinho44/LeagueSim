@@ -23,5 +23,19 @@ def main():
     import season_runner as sr
     sr.main()
 
+def build_team_tier_map(roster_rows):
+    """Return {TeamID: Tier} using the roster. Defaults to 'Unknown'."""
+    m = {}
+    for r in roster_rows:
+        tid = str(r.get("TeamID") or "").strip()
+        if not tid:
+            continue
+        tier = (r.get("Tier") or "").strip() or "Unknown"
+        # first seen wins; all players on a team should share Tier
+        m.setdefault(tid, tier)
+    return m
+
+
+
 if __name__ == "__main__":
     main()

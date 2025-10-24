@@ -57,14 +57,16 @@ BAT_SIDE_P   = {"Right": 0.55, "Left": 0.35, "Switch": 0.10}
 
 # Pitcher clusters → rough pitch-usage priors (illustrative)
 PITCH_CLUSTERS = {
-    "PowerFB":      {"Fastball": 0.55, "Slider": 0.25, "Curveball": 0.10, "Changeup": 0.10},
+    "PowerFB":      {"FourSeamFastball": 0.55, "Slider": 0.25, "Curveball": 0.10, "Changeup": 0.10},
     "SinkerSlider": {"Sinker": 0.45, "Slider": 0.35, "Changeup": 0.15, "Curveball": 0.05},
-    "CutterMix":    {"Cutter": 0.45, "Fastball": 0.25, "Slider": 0.20, "Changeup": 0.10},
-    "ChangeCmd":    {"Fastball": 0.35, "Changeup": 0.35, "Slider": 0.20, "Curveball": 0.10},
-    "BreakHeavy":   {"Curveball": 0.35, "Slider": 0.35, "Fastball": 0.20, "Changeup": 0.10},
+    "TwoSeamHeavy": {"TwoSeamFastball": 0.40, "Sinker": 0.25, "Slider": 0.25, "Changeup": 0.10},
+    "CutterMix":    {"Cutter": 0.45, "FourSeamFastball": 0.25, "Slider": 0.20, "Changeup": 0.10},
+    "ChangeCmd":    {"FourSeamFastball": 0.35, "Changeup": 0.35, "Slider": 0.20, "Curveball": 0.10},
+    "BreakHeavy":   {"Curveball": 0.35, "Slider": 0.35, "FourSeamFastball": 0.20, "Changeup": 0.10},
+    "KnucklerSpec": {"Knuckleball": 0.70, "FourSeamFastball": 0.20, "Changeup": 0.10},
 }
-CLUSTER_WEIGHTS_R = {"PowerFB": 0.34, "SinkerSlider": 0.28, "CutterMix": 0.18, "ChangeCmd": 0.10, "BreakHeavy": 0.10}
-CLUSTER_WEIGHTS_L = {"PowerFB": 0.22, "SinkerSlider": 0.22, "CutterMix": 0.18, "ChangeCmd": 0.18, "BreakHeavy": 0.20}
+CLUSTER_WEIGHTS_R = {"PowerFB": 0.30, "SinkerSlider": 0.25, "TwoSeamHeavy": 0.15, "CutterMix": 0.15, "ChangeCmd": 0.08, "BreakHeavy": 0.06, "KnucklerSpec": 0.01}
+CLUSTER_WEIGHTS_L = {"PowerFB": 0.20, "SinkerSlider": 0.20, "TwoSeamHeavy": 0.18, "CutterMix": 0.15, "ChangeCmd": 0.15, "BreakHeavy": 0.11, "KnucklerSpec": 0.01}
 
 # Simple name banks (deterministic w/ seed)
 CITIES = [
@@ -107,11 +109,13 @@ def _fv_to_role(fv: int) -> str:
 
 # Cluster pitch bumps in grade points
 _CLUSTER_PITCH_BUMPS = {
-    "PowerFB":      {"FB": +6, "SL": +4, "CB": +1, "CH":  0, "CT": +1, "SI":  0, "SPL": 0},
-    "SinkerSlider": {"FB": +1, "SL": +5, "CB":  0, "CH": +1, "CT":  0, "SI": +6, "SPL": 0},
-    "CutterMix":    {"FB": +1, "SL": +3, "CB":  0, "CH":  0, "CT": +6, "SI": +1, "SPL": 0},
-    "ChangeCmd":    {"FB": -1, "SL":  0, "CB":  0, "CH": +7, "CT":  0, "SI":  0, "SPL": 0},
-    "BreakHeavy":   {"FB":  0, "SL": +4, "CB": +7, "CH":  0, "CT":  0, "SI":  0, "SPL": 0},
+    "PowerFB":      {"FB": +6, "4S": +6, "2S": +1, "SL": +4, "CB": +1, "CH":  0, "CT": +1, "SI":  0, "SPL": 0, "KN": 0},
+    "SinkerSlider": {"FB": +1, "4S": +1, "2S": +3, "SL": +5, "CB":  0, "CH": +1, "CT":  0, "SI": +6, "SPL": 0, "KN": 0},
+    "TwoSeamHeavy": {"FB": +2, "4S": +2, "2S": +6, "SL": +3, "CB":  0, "CH": +2, "CT": +1, "SI": +5, "SPL": 0, "KN": 0},
+    "CutterMix":    {"FB": +1, "4S": +1, "2S": +1, "SL": +3, "CB":  0, "CH":  0, "CT": +6, "SI": +1, "SPL": 0, "KN": 0},
+    "ChangeCmd":    {"FB": -1, "4S": -1, "2S":  0, "SL":  0, "CB":  0, "CH": +7, "CT":  0, "SI":  0, "SPL": 0, "KN": 0},
+    "BreakHeavy":   {"FB":  0, "4S":  0, "2S":  0, "SL": +4, "CB": +7, "CH":  0, "CT":  0, "SI":  0, "SPL": 0, "KN": 0},
+    "KnucklerSpec": {"FB": +2, "4S": +2, "2S": +1, "SL": -2, "CB": -2, "CH": +3, "CT":  0, "SI":  0, "SPL": 0, "KN": +15},
 }
 
 def _tier_grade_center(tier: str) -> int:
@@ -127,19 +131,22 @@ def _sample_pitcher_grades(tier: str, cluster: str, role: str, cmd_tier: float, 
 
     grades = {
         "FB":  g(base, bumps.get("FB", 0)),
+        "4S":  g(base, bumps.get("4S", 0)),  # Four-Seam
+        "2S":  g(base, bumps.get("2S", 0)),  # Two-Seam
         "SL":  g(base, bumps.get("SL", 0)),
         "CB":  g(base, bumps.get("CB", 0)),
         "CH":  g(base, bumps.get("CH", 0)),
         "CT":  g(base, bumps.get("CT", 0)),
         "SI":  g(base, bumps.get("SI", 0)),
         "SPL": g(base, bumps.get("SPL", 0)),
+        "KN":  g(base, bumps.get("KN", 0)),  # Knuckleball
     }
     # Command grade from CommandTier: +/-5 grade per 0.10 (tunable)
     cmd_grade = int(round(max(30, min(80, 50 + ((cmd_tier - 1.00) / 0.10) * 5.0))))
     grades["CMD"] = cmd_grade
 
     # Stuff index: avg of best two pitch grades
-    pitch_only = [grades[k] for k in ["FB","SL","CB","CH","CT","SI","SPL"]]
+    pitch_only = [grades[k] for k in ["FB","4S","2S","SL","CB","CH","CT","SI","SPL","KN"]]
     pitch_only.sort(reverse=True)
     stuff_index = sum(pitch_only[:2]) / 2.0 if pitch_only else 50.0
 
@@ -149,7 +156,7 @@ def _sample_pitcher_grades(tier: str, cluster: str, role: str, cmd_tier: float, 
     fv = int(max(40, min(80, fv)))
 
     grades["_FV"] = fv
-    grades["_Role"] = _fv_to_role(fv)
+    grades["_Role"] = fv  # Keep as int for consistency
     return grades
 
 def _sample_hitter_grades(tier: str, archetype: str, rng: random.Random) -> dict:
@@ -177,11 +184,11 @@ def _sample_hitter_grades(tier: str, archetype: str, rng: random.Random) -> dict
     fv = _round5(0.55*grades["Hit"] + 0.30*grades["GamePower"] + 0.10*grades["Field"] + 0.05*grades["Speed"])
     fv = int(max(40, min(80, fv)))
     grades["_FV"] = fv
-    grades["_Role"] = _fv_to_role(fv)
+    grades["_Role"] = fv  # Keep as int for consistency
     return grades
 
 def _bias_pitch_usage_by_grades(means: dict, grades: dict) -> dict:
-    keymap = {"FB":"Fastball","SL":"Slider","CB":"Curveball","CH":"Changeup","CT":"Cutter","SI":"Sinker","SPL":"Splitter"}
+    keymap = {"FB":"Fastball","4S":"FourSeamFastball","2S":"TwoSeamFastball","SL":"Slider","CB":"Curveball","CH":"Changeup","CT":"Cutter","SI":"Sinker","SPL":"Splitter","KN":"Knuckleball"}
     weights = {}
     for pitch_name, mean_p in means.items():
         gkey = None
@@ -196,7 +203,7 @@ def _bias_pitch_usage_by_grades(means: dict, grades: dict) -> dict:
     return {k: v/z for k, v in weights.items()}
 
 def _compute_pitching_weight(gr: dict, role: str) -> float:
-    stuff = sorted([gr.get(k,50) for k in ["FB","SL","CB","CH","CT","SI","SPL"]], reverse=True)[:2]
+    stuff = sorted([gr.get(k,50) for k in ["FB","4S","2S","SL","CB","CH","CT","SI","SPL","KN"]], reverse=True)[:2]
     stuff = sum(stuff)/2.0 if stuff else 50.0
     cmd   = gr.get("CMD", 50)
     if role == "SP":
@@ -228,6 +235,17 @@ def _format_scout_role(present, future, excel_safe: bool = True) -> str:
 
     return ("\u200B" + s) if (excel_safe and s) else s
 
+def build_division_map(roster_rows):
+    div_map = {}
+    for r in roster_rows:
+        tid = str(r.get("TeamID"))
+        div = (r.get("Division") or "").strip()
+        if not div:
+            div = (r.get("Tier") or "").strip()
+        if not div:
+            div = "Unknown"
+        div_map[tid] = div
+    return div_map
 
 
 # --- Lightweight samplers for present role & future FV ---
@@ -285,7 +303,9 @@ GROWTH_TABLE = {
 }
 
 def _growth_fraction(age: int, rng: random.Random) -> float:
-    base = GROWTH_TABLE.get(max(13, min(21, age))),
+    base = GROWTH_TABLE.get(max(13, min(21, age)))
+    if base is None:
+        base = 1.0
     frac = base[0] if isinstance(base, tuple) else base
     return max(0.88, min(1.02, frac + rng.normalvariate(0.0, 0.005)))
 
@@ -698,8 +718,8 @@ def build_roster_for_team(team: Dict, rng: random.Random) -> List[Dict]:
 
         # Scale per-pitch command by pitch+command grades
         for pt in per_pitch_factors:
-            gk = {"Fastball":"FB","Slider":"SL","Curveball":"CB","Changeup":"CH",
-                  "Cutter":"CT","Sinker":"SI","Splitter":"SPL"}.get(pt, None)
+            gk = {"Fastball":"FB","FourSeamFastball":"4S","TwoSeamFastball":"2S","Slider":"SL","Curveball":"CB","Changeup":"CH",
+                  "Cutter":"CT","Sinker":"SI","Splitter":"SPL","Knuckleball":"KN"}.get(pt, None)
             g_here = (p_gr.get(gk, 50) + p_gr.get("CMD", 50)) / 2.0
             per_pitch_factors[pt] = round(per_pitch_factors[pt] * _gmult(g_here, 0.06), 3)
 
@@ -791,6 +811,15 @@ def build_roster_for_team(team: Dict, rng: random.Random) -> List[Dict]:
             weights=[0.40, 0.22, 0.18, 0.12, 0.08], k=1
         )[0]
 
+        # Enforce throwing-hand constraints for certain positions
+        # Catchers and 2B/SS/3B cannot throw left-handed (can still bat left)
+        try:
+            pos_token = str(pos).upper()
+            if pos_token in ("C", "2B", "SS", "3B") and str(throws).lower().startswith("l"):
+                throws = "Right"
+        except Exception:
+            pass
+
         # Hit grades + weight
         h_gr = _sample_hitter_grades(team["Tier"], archetype, rng)
         hitting_weight = _compute_hitting_weight(h_gr)
@@ -812,7 +841,7 @@ def build_roster_for_team(team: Dict, rng: random.Random) -> List[Dict]:
 
             pitch_types = list(PITCH_CLUSTERS[cluster].keys())
             sorted_pitches = sorted(pitch_types, key=lambda k: PITCH_CLUSTERS[cluster][k], reverse=True)
-            per_pitch_factors: Dict[str, float] = {}
+            per_pitch_factors_2way: Dict[str, float] = {}
             for idx_pt, pt in enumerate(sorted_pitches):
                 if idx_pt == 0:       mean, sd = 1.10, 0.06
                 elif idx_pt == 1:     mean, sd = 1.00, 0.06
@@ -823,13 +852,13 @@ def build_roster_for_team(team: Dict, rng: random.Random) -> List[Dict]:
                 factor = rng.normalvariate(mean, sd)
                 factor = max(0.75, min(1.35, factor))
                 # grade scaling
-                gk = {"Fastball":"FB","Slider":"SL","Curveball":"CB","Changeup":"CH",
-                      "Cutter":"CT","Sinker":"SI","Splitter":"SPL"}.get(pt, None)
+                gk = {"Fastball":"FB","FourSeamFastball":"4S","TwoSeamFastball":"2S","Slider":"SL","Curveball":"CB","Changeup":"CH",
+                      "Cutter":"CT","Sinker":"SI","Splitter":"SPL","Knuckleball":"KN"}.get(pt, None)
                 g_here = (p2_gr.get(gk, 50) + p2_gr.get("CMD", 50)) / 2.0
                 factor *= _gmult(g_here, 0.06)
-                per_pitch_factors[pt] = round(factor, 3)
+                per_pitch_factors_2way[pt] = round(factor, 3)
 
-            cmd_by_pitch = {pt: round(cmd * per_pitch_factors[pt], 3) for pt in pitch_types}
+            cmd_by_pitch = {pt: round(cmd * per_pitch_factors_2way[pt], 3) for pt in pitch_types}
             command_by_pitch_json = json.dumps(cmd_by_pitch)
 
             # Geometry for pitcher persona
@@ -928,7 +957,7 @@ def build_rosters(teams: List[Dict], rng: random.Random) -> List[Dict]:
 def round_robin_pairs(team_ids: List[int]) -> List[List[Tuple[int, int]]]:
     teams = team_ids[:]
     if len(teams) % 2 == 1:
-        teams.append(None)
+        teams.append(-1)  # Use -1 as placeholder instead of None
     n = len(teams)
     half = n // 2
     arr = teams[:]
@@ -940,7 +969,7 @@ def round_robin_pairs(team_ids: List[int]) -> List[List[Tuple[int, int]]]:
         pairs: List[Tuple[int, int]] = []
         for i in range(half):
             t1, t2 = left[i], right[i]
-            if t1 is None or t2 is None:
+            if t1 == -1 or t2 == -1:  # Skip placeholder
                 continue
             if r % 2 == 0:
                 pairs.append((t1, t2))
@@ -976,6 +1005,37 @@ def _round_dates_cadence(
         anchor = start_monday + timedelta(weeks=week)
         for off in one_game_offsets:
             if len(dates) >= num_rounds: break
+            dates.append(anchor + timedelta(days=off))
+        week += 1
+    return dates
+
+def _round_dates_weekend(
+    start_monday: date,
+    num_rounds: int,
+    rng: random.Random,
+    midweek_prob: float = 0.35,
+    midweek_days: Sequence[int] = (1, 2),  # Tue/Wed
+) -> List[date]:
+    """Generate round dates emphasizing Fri/Sat/Sun, with occasional Tue/Wed.
+
+    - Produces approximately 3 rounds per week on Fri/Sat/Sun.
+    - With probability midweek_prob each week (independently), inserts one
+      midweek round on Tuesday or Wednesday (chosen randomly) before Fri.
+    - Stops when num_rounds dates are produced.
+    """
+    dates: List[date] = []
+    week = 0
+    while len(dates) < num_rounds:
+        anchor = start_monday + timedelta(weeks=week)
+        # Optional midweek game first
+        if rng.random() < max(0.0, min(1.0, midweek_prob)):
+            if len(dates) < num_rounds:
+                dmid = rng.choice(list(midweek_days)) if midweek_days else 1
+                dates.append(anchor + timedelta(days=int(dmid)))
+        # Weekend slate: Fri/Sat/Sun (4,5,6)
+        for off in (4, 5, 6):
+            if len(dates) >= num_rounds:
+                break
             dates.append(anchor + timedelta(days=off))
         week += 1
     return dates
@@ -1241,7 +1301,9 @@ def _balance_home_away(rows: List[Dict], team_ids: List[int], max_diff: int = 1)
 def build_tier_schedule(team_ids: List[int],
                         games_per_team: int,
                         start_date: date,
-                        rng: random.Random) -> List[Dict]:
+                        rng: random.Random,
+                        cadence: str = "balanced",
+                        midweek_prob: float = 0.35) -> List[Dict]:
     assert len(team_ids) >= 2, "Need at least 2 teams"
     n = len(team_ids)
     single = round_robin_pairs(team_ids)
@@ -1294,12 +1356,73 @@ def build_tier_schedule(team_ids: List[int],
         )
         schedule_rounds = base + extra_rounds
 
-    round_dates = _round_dates_cadence(
-        start_monday=start_date,
-        num_rounds=len(schedule_rounds),
-        two_game_offsets=(1, 4),
-        one_game_offsets=(3,),
-    )
+    # Weekend 3-game series packing: if divisible by 3, build series rounds
+    if cadence == "weekend" and (games_per_team % 3 == 0):
+        series_len = 3
+        # Rebuild rounds targeting series count per team
+        series_target = games_per_team // series_len
+        # Re-run base/extra logic using series_target per team
+        def _build_rounds_for_target(target_per_team: int) -> List[List[Tuple[int,int]]]:
+            n = len(team_ids)
+            single = round_robin_pairs(team_ids)
+            double = double_rr(single)
+            single_cap = n - 1
+            double_cap = 2 * (n - 1)
+            if target_per_team <= single_cap:
+                base_len = _safe_prefix_len(target_per_team, n, len(single))
+                base_r = single[:base_len]
+                extra_r, _ = add_extra_games(team_ids, base_r, target_per_team, len(base_r)+1, 1, rng)
+                return base_r + extra_r
+            elif target_per_team <= double_cap:
+                base_len = _safe_prefix_len(target_per_team, n, len(double))
+                base_r = double[:base_len]
+                extra_r, _ = add_extra_games(team_ids, base_r, target_per_team, len(base_r)+1, 2, rng)
+                return base_r + extra_r
+            else:
+                base_r = double[:]
+                extra_r, _ = add_extra_games(team_ids, base_r, target_per_team, len(base_r)+1, 3, rng)
+                return base_r + extra_r
+
+        schedule_rounds = _build_rounds_for_target(series_target)
+
+        # Generate Friday anchors for each series round
+        anchors: List[date] = []
+        week = 0
+        while len(anchors) < len(schedule_rounds):
+            anchors.append(start_date + timedelta(weeks=week, days=4))  # Friday = +4 from Monday
+            week += 1
+
+        rows: List[Dict] = []
+        for rnd_idx, (rnd, fri) in enumerate(zip(schedule_rounds, anchors), start=1):
+            rnd_local = rnd[:]
+            rng.shuffle(rnd_local)
+            for h, a in rnd_local:
+                for d in (fri, fri + timedelta(days=1), fri + timedelta(days=2)):
+                    rows.append({
+                        "GameID": None,
+                        "Date": d.isoformat(),
+                        "Round": rnd_idx,
+                        "HomeTeamID": h,
+                        "AwayTeamID": a,
+                    })
+        # No home/away rebalancing at series level (home stays for series); overall balance is preserved across rounds
+        return rows
+
+    if cadence == "weekend":
+        round_dates = _round_dates_weekend(
+            start_monday=start_date,
+            num_rounds=len(schedule_rounds),
+            rng=rng,
+            midweek_prob=midweek_prob,
+            midweek_days=(1, 2),  # Tue/Wed
+        )
+    else:
+        round_dates = _round_dates_cadence(
+            start_monday=start_date,
+            num_rounds=len(schedule_rounds),
+            two_game_offsets=(1, 4),
+            one_game_offsets=(3,),
+        )
     assert len(round_dates) == len(schedule_rounds)
 
     rows: List[Dict] = []
@@ -1386,7 +1509,11 @@ def main():
     ap.add_argument("--aaa_games", type=int, default=GAMES_PER_TEAM["AAA"])
     ap.add_argument("--rookie_games", type=int, default=GAMES_PER_TEAM["Rookie"])
     ap.add_argument("--with_postseason", action="store_true",
-                    help="Append 6-team bracket: seeds 1-2 byes; WC single; SF/Final best-of-3")
+                     help="Append 6-team bracket: seeds 1-2 byes; WC single; SF/Final best-of-3")
+    ap.add_argument("--schedule_cadence", choices=["balanced","weekend"], default="balanced",
+                    help="balanced = Tue/Fri/Thu alternating; weekend = Fri/Sat/Sun with occasional Tue/Wed")
+    ap.add_argument("--midweek_prob", type=float, default=0.35,
+                    help="For weekend cadence, probability a given week adds a Tue/Wed game")
     args = ap.parse_args()
 
     rng = random.Random(args.seed)
@@ -1401,6 +1528,8 @@ def main():
     # 3) Rosters
     rosters = build_rosters(teams, rng)
 
+    
+
     # 4) Regular-season schedules per tier
     tier_team_ids: Dict[str, List[int]] = {"Majors": [], "AAA": [], "Rookie": []}
     for t in teams:
@@ -1408,9 +1537,12 @@ def main():
     for tier in tier_team_ids:
         tier_team_ids[tier].sort()
 
-    sched_M = build_tier_schedule(tier_team_ids["Majors"], args.maj_games, start_dt, rng)
-    sched_A = build_tier_schedule(tier_team_ids["AAA"],    args.aaa_games, start_dt + timedelta(days=1), rng)
-    sched_R = build_tier_schedule(tier_team_ids["Rookie"], args.rookie_games, start_dt + timedelta(days=2), rng)
+    sched_M = build_tier_schedule(tier_team_ids["Majors"], args.maj_games, start_dt, rng,
+                                  cadence=args.schedule_cadence, midweek_prob=float(args.midweek_prob))
+    sched_A = build_tier_schedule(tier_team_ids["AAA"],    args.aaa_games, start_dt + timedelta(days=1), rng,
+                                  cadence=args.schedule_cadence, midweek_prob=float(args.midweek_prob))
+    sched_R = build_tier_schedule(tier_team_ids["Rookie"], args.rookie_games, start_dt + timedelta(days=2), rng,
+                                  cadence=args.schedule_cadence, midweek_prob=float(args.midweek_prob))
 
     # Tag tiers + assign GameIDs (prefix M/A/R)
     gid = 1

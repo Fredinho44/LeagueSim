@@ -29,9 +29,20 @@ VELO_LOSS_PER_OVER10    = 0.15  # mph per 10 pitches over limit
 SPIN_LOSS_PER_OVER10    = 20.0  # rpm per 10 pitches over limit
 TTO_PENALTY             = 0.10  # 3rd time through order command penalty
 
+# Scaling for count- and TTO-driven pitch-mix adjustments (1.0 = default strength)
+COUNT_MIX_SCALE = 1.0
+TTO_MIX_SCALE   = 1.0
+
 # Extra-innings knobs
 EXTRA_INNING_FATIGUE_SCALE       = 0.50  # multiplies fatigue per pitch/BF in extras (per extra inning)
 EXTRA_INNING_CMD_FLAT_PENALTY    = 0.03  # extra command tax per extra inning (3% each inning past 9)
+
+# Baserunning/fielding knobs
+SB_ATTEMPT_R1_BASE = 0.06     # per-pitch attempt rate with runner on 1B (context will modulate)
+SB_ATTEMPT_R2_BASE = 0.03     # per-pitch attempt rate with runner on 2B (steal third)
+SB_SUCCESS_BASE    = 0.68     # baseline steal success probability
+SB_CATCHER_R_BONUS = -0.02    # right-throwing catcher reduces success slightly
+ERROR_RATE         = 0.025    # chance that a putout becomes an error (ROE)
 
 # ------------- Shared helpers for game simulation (compact) -------------
 INPLAY_RESULTS = ["Out","Single","Double","Triple","HomeRun"]
@@ -182,11 +193,13 @@ def _safe_float(x, default=None):
         return default
 
 def _grade_to_weight(g: Optional[float]) -> float:
-    try:
-        g = float(g)
-    except Exception:
+    if g is None:
         return 1.0
-    return float(round(0.04 * ((g - 50.0) / 5.0) + 1.0, 3))
+    try:
+        g_val = float(g)
+    except (TypeError, ValueError):
+        return 1.0
+    return float(round(0.04 * ((g_val - 50.0) / 5.0) + 1.0, 3))
 
 def _extract_present_from_role(text: Optional[str]) -> Optional[float]:
     if not text: return None
@@ -351,6 +364,102 @@ def lineup_from_roster_rows(rows: List[Dict[str,str]], team_key: str, rng: rando
     rng.shuffle(bats)
     return bats
 
+# ---------- Position-aware lineup (starter assignments) ----------
+def lineup_by_positions(rows: List[Dict[str,str]], team_key: str, rng: random.Random) -> Tuple[List[Dict[str,str]], Dict[str,str]]:
+    """
+    Build a 9-man lineup by defensive positions with sensible fallbacks.
+    Returns (lineup_list, catcher_info) where catcher_info has keys Catcher, CatcherId, CatcherThrows.
+    """
+    positions = ["C","1B","2B","3B","SS","LF","CF","RF","DH"]
+    # Collect eligible hitters for this team
+    cand: List[Dict[str,str]] = []
+    for r in rows:
+        key = r.get("TeamID") or r.get("TeamName")
+        if str(key) != str(team_key):
+            continue
+        role = (r.get("Role") or "").upper()
+        is_two_way = str(r.get("IsTwoWay","0")).strip().lower() in ("1","true","yes","y")
+        if (role == "BAT") or is_two_way:
+            fv = _safe_float(r.get("ScoutFV"), 50.0)
+            w  = _safe_float(r.get("HittingWeight"), None)
+            if w is None:
+                w = _grade_to_weight(fv)
+            cand.append({
+                "PlayerID": r.get("PlayerID",""),
+                "FirstName": r.get("FirstName",""),
+                "LastName": r.get("LastName",""),
+                "FullName": f"{r.get('FirstName','')} {r.get('LastName','')}".strip(),
+                "Bats": r.get("Bats","Right"),
+                "Throws": r.get("Throws","Right"),
+                "Position": (r.get("Position") or "").upper(),
+                "SecondaryPosition": (r.get("SecondaryPosition") or "").upper(),
+                "_Weight": float(w),
+            })
+
+    used_ids: set[str] = set()
+    lineup: List[Dict[str,str]] = []
+    catcher_info = {"Catcher":"","CatcherId":"","CatcherThrows":""}
+
+    def pick_for(pos: str) -> Dict[str,str] | None:
+        def eligible(p):
+            P = p["Position"]; S = p["SecondaryPosition"]
+            if pos == "C":
+                # Prefer right-throwing catchers; allow secondary C
+                thr = (p.get("Throws") or "").strip().upper()
+                is_c = ("C" in P.split("/") or P == "C" or "C" in P) or ("C" in S)
+                return is_c and (not thr.startswith("L"))
+            if pos in ("LF","CF","RF"):
+                return (pos in P.split("/") or pos == P or pos in P or "OF" in P or pos in S or "OF" in S)
+            if pos == "DH":
+                return True
+            # Infield positions
+            return (pos in P.split("/") or pos == P or pos in P or pos in S or "IF" in S or "UT" in S)
+
+        pool = [p for p in cand if (p["PlayerID"] not in used_ids) and eligible(p)]
+        if not pool and pos == "C":
+            # Fallback: allow any catcher even if left-throwing
+            pool = [p for p in cand if (p["PlayerID"] not in used_ids) and (("C" in p["Position"]) or ("C" in p["SecondaryPosition"]))]
+        if not pool:
+            # Broad fallback: any not used
+            pool = [p for p in cand if (p["PlayerID"] not in used_ids)]
+        if not pool:
+            return None
+        pool = sorted(pool, key=lambda p: p["_Weight"], reverse=True)
+        choice = pool[0]
+        used_ids.add(choice["PlayerID"])
+        return choice
+
+    for pos in positions:
+        p = pick_for(pos)
+        if p is None:
+            # Inject placeholder if needed
+            pid = f"X{rng.randrange(100000,999999)}"
+            name = f"Player {pid[-4:]}"
+            entry = {"Batter": name, "BatterId": pid, "BatterTeam": team_key, "BatterSide": rng.choice(["Right","Left","Switch"]), "_Quality": 1.0, "_TimesFaced": 0, "Position": pos, "Throws": "Right"}
+        else:
+            full = p["FullName"] or (f"{p['FirstName']} {p['LastName']}").strip() or f"Player {p['PlayerID']}"
+            entry = {
+                "Batter": full,
+                "BatterId": p["PlayerID"] or str(20000 + rng.randrange(10000)),
+                "BatterTeam": team_key,
+                "BatterSide": p["Bats"] or rng.choice(["Right","Left","Switch"]),
+                "_Quality": float(p["_Weight"]),
+                "_TimesFaced": 0,
+                "Position": pos,
+                "Throws": p.get("Throws","Right"),
+            }
+            if pos == "C" and not catcher_info["CatcherId"]:
+                catcher_info = {
+                    "Catcher": full,
+                    "CatcherId": entry["BatterId"],
+                    "CatcherThrows": ("Right" if str(p.get("Throws","R")).strip().upper().startswith("R") else "Left")
+                }
+        lineup.append(entry)
+
+    # Shuffle batting order a bit while keeping the same 9
+    rng.shuffle(lineup)
+    return lineup, catcher_info
+
 # ---------- Availability / rotation ----------
 def is_available(p: Dict[str,Any], when: datetime) -> bool:
     if p["_Injured"]: return False
@@ -371,20 +480,56 @@ def choose_sp_for_date(staff: Dict[str,Any], game_dt: datetime) -> Optional[Dict
     return None
 
 def mark_recovery(p: Dict[str,Any], game_dt: datetime, pitches: int, role: str):
-    base = p["_RecDays"] if role == "SP" else 0
+    base = p.get("_RecDays", DEFAULT_SP_RECOVERY) if role == "SP" else 0
+    sta = float(p.get("_Stamina", 50.0) or 50.0)
     if role == "RP":
+        # Multi-day relief recovery curve by pitches thrown
         if   pitches >= 61: base = 4
         elif pitches >= 46: base = 3
         elif pitches >= 31: base = 2
         elif pitches >= 1:  base = 1
         else:               base = 0
+        # Back-to-back penalty: if also pitched the previous day, add an extra day
+        try:
+            last = p.get("_LastPitchDate")
+            if last is not None and isinstance(last, datetime):
+                days_sep = (game_dt.date() - last.date()).days
+            elif last is not None:
+                # if stored as date
+                days_sep = (game_dt.date() - last).days
+            else:
+                days_sep = None
+            if days_sep is not None and days_sep <= 1:
+                base += 1
+        except Exception:
+            pass
+    # Scale recovery by stamina (higher stamina -> slightly faster recovery)
+    try:
+        # 50 is neutral; each 10 points from 50 shifts ~5% (bounded)
+        rec_scale = 1.0 - max(-0.3, min(0.3, (sta - 50.0) / 10.0 * 0.05))
+        base = int(max(0, round(base * rec_scale)))
+    except Exception:
+        pass
     extra = 0
     if pitches > p["_Limit"] + 10: extra += 1
     if pitches > p["_Limit"] + 25: extra += 1
     p["_NextOK"] = (game_dt + timedelta(days=base + extra)).replace(hour=0, minute=0, second=0, microsecond=0)
+    # Track last pitched date for future back-to-back checks
+    try:
+        p["_LastPitchDate"] = game_dt.date()
+    except Exception:
+        pass
 
 def maybe_injure(p: Dict[str,Any], rng: random.Random, pitches: int):
-    if pitches > p["_Limit"] + 25 and rng.random() < INJURY_CHANCE_HEAVY_OVER:
-        days = rng.randint(*INJURY_DUR_RANGE)
-        p["_Injured"] = True
-        p["_NextOK"] = (p["_NextOK"] or datetime.now()) + timedelta(days=days)
+    # Scale injury risk by how far over limit and by stamina
+    if pitches > p["_Limit"] + 25:
+        sta = float(p.get("_Stamina", 50.0) or 50.0)
+        over = max(0, pitches - (int(p.get("_Limit") or 0) + 25))
+        # Stamina effect: lower stamina increases risk up to +40%, higher stamina reduces up to -25%
+        stamina_factor = 1.0 + max(-0.25, min(0.40, (50.0 - sta) / 50.0 * 0.40))
+        over_factor = 1.0 + min(1.0, over / 30.0) * 0.50  # up to +50% if far beyond
+        pr = float(INJURY_CHANCE_HEAVY_OVER) * stamina_factor * over_factor
+        if rng.random() < pr:
+            days = rng.randint(*INJURY_DUR_RANGE)
+            p["_Injured"] = True
+            p["_NextOK"] = (p["_NextOK"] or datetime.now()) + timedelta(days=days)
